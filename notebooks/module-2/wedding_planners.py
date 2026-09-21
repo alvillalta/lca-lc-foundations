@@ -3,6 +3,7 @@ load_dotenv()
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent, AgentState
@@ -14,8 +15,9 @@ from langgraph.types import Command
 
 
 from langchain_community.utilities import SQLDatabase
-db = SQLDatabase.from_uri("sqlite:///resources/Chinook.db")
-
+# db = SQLDatabase.from_uri("sqlite:///resources/Chinook.db")
+DB_PATH = Path(__file__).parent / "resources" / "Chinook.db"
+db = SQLDatabase.from_uri(f"sqlite:///{DB_PATH.as_posix()}")
 
 orchestrator_system_prompt = f"""
     You are a Wedding Planner Orchestrator responsible for coordinating three specialized agents:
@@ -66,18 +68,18 @@ venue_agent_system_prompt = f"""
 """
 
 dj_agent_system_prompt = f"""
-You are a specialized DJ Agent responsible for creating suitable wedding playlists.
-Use the available SQL database tool to search for songs and build a playlist based on the user's requirements.
+    You are a specialized DJ Agent responsible for creating suitable wedding playlists.
+    Use the available SQL database tool to search for songs and build a playlist based on the user's requirements.
 
-Your responsibilities:
+    Your responsibilities:
 
-- Identify the wedding style, musical preferences, and any relevant constraints.
-- Search the SQL music database for suitable songs.
-- Consider relevant factors such as genre, mood, artist, popularity, and requested preferences when provided.
-- Return a well-balanced playlist with the song title, artist, and relevant details.
-- Never invent songs or database information. If essential information is missing, ask for it.
+    - Identify the wedding style, musical preferences, and any relevant constraints.
+    - Search the SQL music database for suitable songs.
+    - Consider relevant factors such as genre, mood, artist, popularity, and requested preferences when provided.
+    - Return a well-balanced playlist with the song title, artist, and relevant details.
+    - Never invent songs or database information. If essential information is missing, ask for it.
 
-Return concise, structured results that the Wedding Planner Orchestrator can easily integrate into the final wedding plan.
+    Return concise, structured results that the Wedding Planner Orchestrator can easily integrate into the final wedding plan.
 """
 
 travel_client = MultiServerMCPClient(
@@ -101,7 +103,7 @@ venue_client = MultiServerMCPClient(
 
 model = init_chat_model(
     model="gpt-5-nano",
-    temperature=0.4
+    temperature=1
 )
 
 class CustomState(AgentState): 
@@ -146,7 +148,7 @@ async def wedding_planners():
 
     travel_subagent = create_agent(
         model=model,
-        tools=[mcp_travel_tool],
+        tools=mcp_travel_tool,
         system_prompt=travel_agent_system_prompt
     )
 
@@ -160,7 +162,7 @@ async def wedding_planners():
 
     venue_subagent = create_agent(
         model=model,
-        tools=[mcp_venue_tool],
+        tools=mcp_venue_tool,
         system_prompt=venue_agent_system_prompt
     )
 
@@ -192,7 +194,7 @@ async def wedding_planners():
 
     agent = create_agent(
         model=model,
-        tools=[get_trip_year, update_number_of_passengers, read_cabin_class, call_travel_subagent],
+        tools=[get_trip_year, update_number_of_passengers, read_cabin_class, call_travel_subagent, call_venue_subagent, call_dj_subagent],
         system_prompt=orchestrator_system_prompt,
         context_schema=TripConstraints,
         state_schema=CustomState,
@@ -203,11 +205,18 @@ async def wedding_planners():
 
 
 async def main():
-    query = "Plan a wedding from "
+    query = f"""
+        Plan a wedding in New York.
+
+        - Find round-trip flights from Madrid to New York for 2 people, departing October 1st and returning October 5th.
+        - Find a suitable wedding venue in New York.
+        - Create an appropriate wedding ceremony playlist based on the wedding context.
+        - Prioritize the cheapest available options for flights and venue.
+    """
 
     agent = await wedding_planners()
 
-    config = {"configurable": {"thread_id": "3"}}
+    config = {"configurable": {"thread_id": "4"}}
 
     response = await agent.ainvoke(
         {
